@@ -8,6 +8,7 @@ from turtle import forward
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from util import masked_softmax
@@ -100,7 +101,7 @@ class Depthwise_conv(nn.Module):
     def __init__(self, in_chan, out_chan, kern_size):
         super().__init__()
         # Depth with groups = in_chan will convolve over each channel of the input. What type of padding should I use?
-        self.depth = nn.Conv1d(in_channels=in_chan, out_channels=in_chan, kernel_size=kern_size, groups=in_chan, padding='same', bias=False)
+        self.depth = nn.Conv1d(in_channels=in_chan, out_channels=in_chan, kernel_size=kern_size, groups=in_chan, padding=3, bias=False)
         # Point with groups = 1 will convolve 1x1 across channels
         self.point = nn.Conv1d(in_channels=in_chan, out_channels=out_chan, kernel_size=1, padding=0, bias=True)
     def forward(self, x):
@@ -109,43 +110,75 @@ class Depthwise_conv(nn.Module):
         x = F.relu(x)
         return x
 
-def position(x):
-    return x
+class PositionalEncoding(nn.Module):
+    '''
+    from the paper "Attention is all you need"
+    and the pytorch website: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
+    '''
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 500):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        """
+        Args:
+            x: Tensor, shape [seq_len, batch_size, embedding_dim]
+        """
+        x = x + self.pe[:x.size(0)]
+        return self.dropout(x)
 
 class Embed_encoder_block(nn.Module):
     '''
     The encoder layer is a stack of the following basic building block:
     [convolution-layer × # + self-attention-layer + feed-forward-layer]
     TODO: I'm pretty sure channels is the same as input_size
+    TODO: I think we need cmask here? looks like: return output * mask
     '''
     def __init__(self, input_size, conv_num, channels, kern_size, drop_prob=0):
         super().__init__()
         self.conv_num = conv_num
-        self.input
-        self.convs = [Depthwise_conv(channels, channels, kern_size) for i in range(conv_num)]
-        self.self_attention = nn.MultiheadAttention(input_size, num_heads=8, dropout=drop_prob)
-        self.feed_forward = F.relu(nn.Conv1d(in_channels=channels, out_channels=channels))
-        self.norms = [nn.LayerNorm(channels) for i in range(conv_num + 2)]
+        self.input_size = input_size
+        self.convs = [Depthwise_conv(input_size, input_size, kern_size) for i in range(conv_num)]
+        # TODO: properly define input size, channels, etc.
+        self.self_attention = nn.MultiheadAttention(input_size, num_heads=4, dropout=drop_prob)
+        # TODO: padding = 3 should actually be kernel size // 2 right?
+        self.feed_forward = nn.Conv1d(in_channels=input_size, out_channels=input_size, kernel_size=kern_size, padding=3)
+        self.norms = [nn.LayerNorm(input_size) for i in range(conv_num + 2)]
         self.dropout = nn.Dropout(drop_prob)
-    def forward(self, x):
+        self.positional = PositionalEncoding(input_size)
+
+    def forward(self, x, mask):
 
         '''
         The blocks are (layer norm + conv)*conv_num + layer norm + self_attention + layer norm + Feed forward
         '''
-        # Save the residual TODO make positional encoder
-        out = position(x)
+        # Save the residual 
+        x = x.permute(1, 0, 2)
+        out = self.positional(x)
+        out = out.permute(1, 0, 2)
         for i in range(self.conv_num):
             res = out
-            # possibly need to transpose 1, 2 and reverse
             x = self.norms[i](res)
             # dropout prob should be pretty small no?
             x = self.dropout(x)
-            x = self.convs[i](x)
+            # Conv is (N, C, L)
+            x = self.convs[i](x.transpose(1,2)).transpose(1,2)
             out = x + res
         out = self.norms[-2](out)
-        out = self.self_attention(out)
+        out = out.permute(1, 0, 2)
+        # why is pytorch so weird
+        out, _ = self.self_attention(out, out, out, mask==False)
+        out = out.permute(1, 0, 2)
         out = self.norms[-1](out)
-        out = self.feed_forward(out)
+        out = self.feed_forward(out.transpose(1,2)).transpose(1,2)
+        out = F.relu(out)
         return out
 
 
@@ -257,8 +290,7 @@ class BiDAFAttention(nn.Module):
 
         # Shapes: (batch_size, c_len, q_len)
         s0 = torch.matmul(c, self.c_weight).expand([-1, -1, q_len])
-        s1 = torch.matmul(q, self.q_weight).transpose(1, 2)\
-                                           .expand([-1, c_len, -1])
+        s1 = torch.matmul(q, self.q_weight).transpose(1, 2).expand([-1, c_len, -1])
         s2 = torch.matmul(c * self.cq_weight, q.transpose(1, 2))
         s = s0 + s1 + s2 + self.bias
 
@@ -302,3 +334,24 @@ class BiDAFOutput(nn.Module):
         log_p2 = masked_softmax(logits_2.squeeze(), mask, log_softmax=True)
 
         return log_p1, log_p2
+
+class Output(nn.Module):
+    def __init__(self, dim, context_len = 500):
+        '''
+        dim is dimension of everything
+        '''
+        super().__init__()
+        self.dim = dim
+        self.l1 = nn.Linear(dim*8, 1)
+        self.l2 = nn.Linear(dim*8, 1)
+    
+    def forward(self, output1, output2, output3, context_mask):
+        start = torch.cat((output1, output2), 2)
+        start = self.l1(start)
+        end = torch.cat((output1, output3), 2)
+        end = self.l2(end)
+        # TODO see if we don't need squeeze()
+        start = masked_softmax(start.squeeze(), context_mask, log_softmax= True)
+        end = masked_softmax(end.squeeze(), context_mask, log_softmax= True)
+
+        return start, end
