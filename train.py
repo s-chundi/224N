@@ -73,8 +73,7 @@ def main(args):
 
     # Get data loader
     log.info('Building dataset...')
-    # TODO Revert to normal sized dataset
-    train_dataset = SQuAD('data/smaller_train.npz', args.use_squad_v2)
+    train_dataset = SQuAD('data/train.npz', args.use_squad_v2)
     train_loader = data.DataLoader(train_dataset,
                                    batch_size= args.batch_size,
                                    shuffle=True,
@@ -92,7 +91,7 @@ def main(args):
     steps_till_eval = args.eval_steps
     epoch = step // len(train_dataset)
     # TODO train for all epochs
-    while epoch != 2: #args.num_epochs:
+    while epoch != args.num_epochs:
         epoch += 1
         log.info(f'Starting epoch {epoch}...')
         with torch.enable_grad(), \
