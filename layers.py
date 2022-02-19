@@ -4,6 +4,7 @@ Author:
     Chris Chute (chute@stanford.edu)
 """
 
+from turtle import forward
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,7 +12,19 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from util import masked_softmax
 
-
+# this is d from the paper
+d = 128
+'''
+TODO: Add character embeddings
+1.The characterembedding is obtained as follows: Each character is represented as a trainable vector of dimension
+p2 = 200, meaning each word can be viewed as the concatenation of the embedding vectors for each
+of its characters. The length of each word is either truncated or padded to 16. We take maximum
+value of each row of this matrix to get a fixed-size vector representation of each word. Finally, the
+output of a given word x from this layer is the concatenation [xw; xc] ∈ Rp1+p2
+, where xw and xc are the word embedding and the convolution output of character embedding of x respectively.
+Following Seo et al. (2016), we also adopt a two-layer highway network (Srivastava et al., 2015) on
+top of this representation. For simplicity, we also use x to denote the output of this layer
+'''
 class Embedding(nn.Module):
     """Embedding layer used by BiDAF, without the character-level component.
 
@@ -66,6 +79,75 @@ class HighwayEncoder(nn.Module):
             x = g * t + (1 - g) * x
 
         return x
+'''
+2. Embedding Encoder Layer. The encoder layer is a stack of the following basic building block:
+[convolution-layer × # + self-attention-layer + feed-forward-layer], as illustrated in the upper right
+of Figure 1. We use depthwise separable convolutions (Chollet, 2016) (Kaiser et al., 2017) rather
+than traditional ones, as we observe that it is memory efficient and has better generalization. The
+kernel size is 7, the number of filters is d = 128 and the number of conv layers within a block is
+4. For the self-attention-layer, we adopt the multi-head attention mechanism defined in (Vaswani
+et al., 2017a) which, for each position in the input, called the query, computes a weighted sum of all
+positions, or keys, in the input based on the similarity between the query and key as measured by
+the dot product. The number of heads is 8 throughout all the layers. Each of these basic operations
+(conv/self-attention/ffn) is placed inside a residual block, shown lower-right in Figure 1. For an
+input x and a given operation f, the output is f(layernorm(x)) +x, meaning there is a full identity
+path from the input to output of each block, where layernorm indicates layer-normalization proposed
+in (Ba et al., 2016). The total number of encoder blocks is 1. Note that the input of this layer is
+a vector of dimension p1 + p2 = 500 for each individual word, which is immediately mapped to
+d = 128 by a one-dimensional convolution. The output of this layer is a also of dimension d = 128.
+'''
+class Depthwise_conv(nn.Module):
+    def __init__(self, in_chan, out_chan, kern_size):
+        super().__init__()
+        # Depth with groups = in_chan will convolve over each channel of the input. What type of padding should I use?
+        self.depth = nn.Conv1d(in_channels=in_chan, out_channels=in_chan, kernel_size=kern_size, groups=in_chan, padding='same', bias=False)
+        # Point with groups = 1 will convolve 1x1 across channels
+        self.point = nn.Conv1d(in_channels=in_chan, out_channels=out_chan, kernel_size=1, padding=0, bias=True)
+    def forward(self, x):
+        x = self.depth(x)
+        x = self.point(x)
+        x = F.relu(x)
+        return x
+
+def position(x):
+    return x
+
+class Embed_encoder_block(nn.Module):
+    '''
+    The encoder layer is a stack of the following basic building block:
+    [convolution-layer × # + self-attention-layer + feed-forward-layer]
+    TODO: I'm pretty sure channels is the same as input_size
+    '''
+    def __init__(self, input_size, conv_num, channels, kern_size, drop_prob=0):
+        super().__init__()
+        self.conv_num = conv_num
+        self.input
+        self.convs = [Depthwise_conv(channels, channels, kern_size) for i in range(conv_num)]
+        self.self_attention = nn.MultiheadAttention(input_size, num_heads=8, dropout=drop_prob)
+        self.feed_forward = F.relu(nn.Conv1d(in_channels=channels, out_channels=channels))
+        self.norms = [nn.LayerNorm(channels) for i in range(conv_num + 2)]
+        self.dropout = nn.Dropout(drop_prob)
+    def forward(self, x):
+
+        '''
+        The blocks are (layer norm + conv)*conv_num + layer norm + self_attention + layer norm + Feed forward
+        '''
+        # Save the residual TODO make positional encoder
+        out = position(x)
+        for i in range(self.conv_num):
+            res = out
+            # possibly need to transpose 1, 2 and reverse
+            x = self.norms[i](res)
+            # dropout prob should be pretty small no?
+            x = self.dropout(x)
+            x = self.convs[i](x)
+            out = x + res
+        out = self.norms[-2](out)
+        out = self.self_attention(out)
+        out = self.norms[-1](out)
+        out = self.feed_forward(out)
+        return out
+
 
 
 class RNNEncoder(nn.Module):

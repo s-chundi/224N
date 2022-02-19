@@ -58,15 +58,17 @@ class BiDAF(nn.Module):
 
         c_emb = self.emb(cw_idxs)         # (batch_size, c_len, hidden_size)
         q_emb = self.emb(qw_idxs)         # (batch_size, q_len, hidden_size)
-
+        print(f'Embedding Size: {c_emb.size()}')
+        print(f'Embedding Size: {q_emb.size()}')
         c_enc = self.enc(c_emb, c_len)    # (batch_size, c_len, 2 * hidden_size)
         q_enc = self.enc(q_emb, q_len)    # (batch_size, q_len, 2 * hidden_size)
-
+        print(f'Once theyre encoded, expect {c_enc.size()}')
+        print(f'Once theyre encoded, expect {q_enc.size()}')
         att = self.att(c_enc, q_enc,
                        c_mask, q_mask)    # (batch_size, c_len, 8 * hidden_size)
-
+        print('Attention size', att.size())
         mod = self.mod(att, c_len)        # (batch_size, c_len, 2 * hidden_size)
 
         out = self.out(att, mod, c_mask)  # 2 tensors, each (batch_size, c_len)
-
+        print('Output_sizes', out[0].size())
         return out

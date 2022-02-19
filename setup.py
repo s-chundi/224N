@@ -57,13 +57,13 @@ def download(args):
     for name, url in downloads:
         output_path = url_to_data_path(url)
         if not os.path.exists(output_path):
-            print(f'Downloading {name}...')
+            print('Downloading' + name + '...')
             download_url(url, output_path)
 
         if os.path.exists(output_path) and output_path.endswith('.zip'):
             extracted_path = output_path.replace('.zip', '')
             if not os.path.exists(extracted_path):
-                print(f'Unzipping {name}...')
+                print('Unzipping' + name + '...')
                 with ZipFile(output_path, 'r') as zip_fh:
                     zip_fh.extractall(extracted_path)
 
