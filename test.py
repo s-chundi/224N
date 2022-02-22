@@ -1,7 +1,7 @@
 """Test a model and generate submission CSV.
 
 Usage:
-    > python test.py --split SPLIT --load_path PATH --name NAME
+    > python test.py --split dev --load_path save/train/please-01/best.pth.tar --name thanks
     where
     > SPLIT is either "dev" or "test"
     > PATH is a path to a checkpoint (e.g., save/train/model-01/best.pth.tar)
@@ -12,6 +12,8 @@ Author:
 """
 
 import csv
+import sys
+sys.settrace
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,7 +23,7 @@ import util
 from args import get_test_args
 from collections import OrderedDict
 from json import dumps
-from models import BiDAF
+from models import QAnet
 from os.path import join
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
@@ -43,7 +45,7 @@ def main(args):
 
     # Get model
     log.info('Building model...')
-    model = BiDAF(word_vectors=word_vectors,
+    model = QAnet(word_vectors=word_vectors,
                   hidden_size=args.hidden_size)
     model = nn.DataParallel(model, gpu_ids)
     log.info(f'Loading checkpoint from {args.load_path}...')

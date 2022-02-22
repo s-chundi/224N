@@ -37,15 +37,25 @@ class Embedding(nn.Module):
         hidden_size (int): Size of hidden activations.
         drop_prob (float): Probability of zero-ing out activations
     """
-    def __init__(self, word_vectors, hidden_size, drop_prob):
+    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob):
         super(Embedding, self).__init__()
         self.drop_prob = drop_prob
         self.embed = nn.Embedding.from_pretrained(word_vectors)
-        self.proj = nn.Linear(word_vectors.size(1), hidden_size, bias=False)
+        self.chars = nn.Embedding.from_pretrained(char_vectors)
+        self.embed_dim = self.chars.embedding_dim
+        self.conv = nn.Conv1d(char_vectors.size(1)*16, 200, kernel_size=5, padding=2)
+        self.proj = nn.Linear(200+word_vectors.size(1), hidden_size, bias=False)
+        self.pool = nn.AdaptiveMaxPool1d(1)
         self.hwy = HighwayEncoder(2, hidden_size)
 
-    def forward(self, x):
+    def forward(self, x, y):
         emb = self.embed(x)   # (batch_size, seq_len, embed_size)
+        chars = self.chars(y)
+        chars = chars.reshape(chars.size(0), chars.size(1), chars.size(2)*self.embed_dim)
+        chars = chars.permute(0, 2, 1)
+        chars = self.conv(chars)
+        chars = chars.permute(0, 2, 1)
+        emb = torch.cat((emb, chars), dim=2)
         emb = F.dropout(emb, self.drop_prob, self.training)
         emb = self.proj(emb)  # (batch_size, seq_len, hidden_size)
         emb = self.hwy(emb)   # (batch_size, seq_len, hidden_size)
@@ -145,12 +155,12 @@ class Embed_encoder_block(nn.Module):
         super().__init__()
         self.conv_num = conv_num
         self.input_size = input_size
-        self.convs = [Depthwise_conv(input_size, input_size, kern_size) for i in range(conv_num)]
+        self.convs = nn.ModuleList([Depthwise_conv(input_size, input_size, kern_size) for i in range(conv_num)])
         # TODO: properly define input size, channels, etc.
         self.self_attention = nn.MultiheadAttention(input_size, num_heads=4, dropout=drop_prob)
         # TODO: padding = 3 should actually be kernel size // 2 right?
         self.feed_forward = nn.Conv1d(in_channels=input_size, out_channels=input_size, kernel_size=kern_size, padding=3)
-        self.norms = [nn.LayerNorm(input_size) for i in range(conv_num + 2)]
+        self.norms = nn.ModuleList([nn.LayerNorm(input_size) for i in range(conv_num + 2)])
         self.dropout = nn.Dropout(drop_prob)
         self.positional = PositionalEncoding(input_size)
 

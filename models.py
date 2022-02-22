@@ -7,6 +7,7 @@ Author:
 import layers
 import torch
 import torch.nn as nn
+import util
 
 
 class BiDAF(nn.Module):
@@ -74,15 +75,27 @@ class QAnet(nn.Module):
         hidden_size (int): Number of features in the hidden state at each layer.
         drop_prob (float): Dropout probability.
     """
-    def __init__(self, word_vectors, hidden_size, drop_prob=0.):
+    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob=0.):
         super(QAnet, self).__init__()
-        self.emb = layers.Embedding(word_vectors=word_vectors,
+        self.embC = layers.Embedding(word_vectors=word_vectors,
+                                    char_vectors=char_vectors,
                                     hidden_size=hidden_size,
-                                    drop_prob=drop_prob)                            
+                                    drop_prob=drop_prob)
+
+        self.embQ = layers.Embedding(word_vectors=word_vectors,
+                                    char_vectors=char_vectors,
+                                    hidden_size=hidden_size,
+                                    drop_prob=drop_prob)
 
         # TODO: conv number should be 4 or something. Make kernel size a hyperparameter
-        self.enc = layers.Embed_encoder_block(input_size=hidden_size,
-                                            conv_num=2,
+        self.encC = layers.Embed_encoder_block(input_size=hidden_size,
+                                            conv_num=4,
+                                            channels=hidden_size,
+                                            kern_size=7,
+                                            drop_prob=0.1)
+
+        self.encQ = layers.Embed_encoder_block(input_size=hidden_size,
+                                            conv_num=4,
                                             channels=hidden_size,
                                             kern_size=7,
                                             drop_prob=0.1)
@@ -92,35 +105,35 @@ class QAnet(nn.Module):
 
         # TODO: conv number should be 4 or something. Make kernel size a hyperparameter
         self.block1 = layers.Embed_encoder_block(input_size=4 * hidden_size,
-                                     conv_num=2,
+                                     conv_num=4,
                                      channels= 4 * hidden_size,
                                      kern_size=7,
                                      drop_prob=drop_prob)
 
         self.block2 = layers.Embed_encoder_block(input_size=4 * hidden_size,
-                                     conv_num=2,
+                                     conv_num=4,
                                      channels= 4 * hidden_size,
                                      kern_size=7,
                                      drop_prob=drop_prob)
 
         self.block3 = layers.Embed_encoder_block(input_size=4 * hidden_size,
-                                     conv_num=2,
+                                     conv_num=4,
                                      channels= 4 * hidden_size,
                                      kern_size=7,
                                      drop_prob=drop_prob)
 
         self.out = layers.Output(dim=hidden_size, context_len=150)
 
-    def forward(self, cw_idxs, qw_idxs):
+    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
         c_mask = torch.zeros_like(cw_idxs) != cw_idxs
         q_mask = torch.zeros_like(qw_idxs) != qw_idxs
         c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
 
-        c_emb = self.emb(cw_idxs)         
-        q_emb = self.emb(qw_idxs)
+        c_emb = self.embC(cw_idxs, cc_idxs)         
+        q_emb = self.embQ(qw_idxs, qc_idxs)
         
-        c_enc = self.enc(c_emb, c_mask)   
-        q_enc = self.enc(q_emb, q_mask)
+        c_enc = self.encC(c_emb, c_mask)   
+        q_enc = self.encQ(q_emb, q_mask)
         # Done until here  
         att = self.att(c_enc, q_enc, c_mask, q_mask)    
         out1 = self.block1(att, c_mask)
@@ -128,5 +141,32 @@ class QAnet(nn.Module):
         out3 = self.block3(out2, c_mask)
 
         out = self.out(out1, out2, out3, c_mask)  # 2 tensors, each (batch_size, c_len)
-        # print('Output_sizes', out[0].size())
         return out
+
+class Simple(nn.Module):
+    def __init__(self, word_vectors, hidden_size, drop_prob=0.):
+        super(Simple, self).__init__()
+        self.emb = layers.Embedding(word_vectors=word_vectors,
+                                    hidden_size=hidden_size,
+                                    drop_prob=drop_prob)
+        self.lin0 = nn.Linear(164*100, 164*100)
+        self.lin1 = nn.Linear(164*100, 150)
+        self.lin2 = nn.Linear(164*100, 150)
+
+    def forward(self, cw_idxs, qw_idxs):
+        c_mask = torch.zeros_like(cw_idxs) != cw_idxs
+        q_mask = torch.zeros_like(qw_idxs) != qw_idxs
+        c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
+
+        c_emb = self.emb(cw_idxs)         # (batch_size, c_len, hidden_size)
+        q_emb = self.emb(qw_idxs)         # (batch_size, q_len, hidden_size)
+        
+        a = torch.cat((c_emb, q_emb), dim=1)
+        bs, len, hsize = a.size()
+        a = torch.reshape(a, (bs, len*hsize))
+        b = self.lin1(a)
+        c = self.lin2(a)
+        d = util.masked_softmax(b, c_mask, log_softmax=True)
+        e = util.masked_softmax(c, c_mask, log_softmax=True)
+        
+        return d, e
