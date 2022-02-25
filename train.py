@@ -2,10 +2,6 @@
 
 Author:
     Chris Chute (chute@stanford.edu)
-
-To run on cpu:
-python train.py -n today --num_workers 0 --train_record_file 'data/smaller_train.npz' --num_epochs 90 --eval_steps 90 --dev_record_file 'data/smaller_train.npz'
-
 """
 
 import numpy as np
@@ -21,7 +17,7 @@ import util
 from args import get_train_args
 from collections import OrderedDict
 from json import dumps
-from models import QAnet
+from models import   QANet
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 from ujson import load as json_load
@@ -48,12 +44,12 @@ def main(args):
     log.info('Loading embeddings...')
     word_vectors = util.torch_from_json(args.word_emb_file)
     char_vectors = util.torch_from_json(args.char_emb_file)
+
     # Get model
     log.info('Building model...')
-    model = QAnet(word_vectors=word_vectors,
+    model =   QANet(word_vectors=word_vectors,
                   char_vectors=char_vectors,
-                  hidden_size=args.hidden_size,
-                  drop_prob=args.drop_prob)
+                  hid_size=args.hidden_size)
     model = nn.DataParallel(model, args.gpu_ids)
     if args.load_path:
         log.info(f'Loading checkpoint from {args.load_path}...')
@@ -110,7 +106,7 @@ def main(args):
                 optimizer.zero_grad()
 
                 # Forward
-                log_p1, log_p2 = model(cw_idxs, qw_idxs, cc_idxs, qc_idxs)
+                log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs)
                 y1, y2 = y1.to(device), y2.to(device)
                 loss = F.nll_loss(log_p1, y1) + F.nll_loss(log_p2, y2)
                 loss_val = loss.item()
@@ -142,7 +138,9 @@ def main(args):
                     results, pred_dict = evaluate(model, dev_loader, device,
                                                   args.dev_eval_file,
                                                   args.max_ans_len,
-                                                  args.use_squad_v2)
+                                                  args.use_squad_v2,
+                                                  # TODO: remove this line
+                                                  epoch > 140)
                     saver.save(step, model, results[args.metric_name], device)
                     ema.resume(model)
 
@@ -162,7 +160,7 @@ def main(args):
                                    num_visuals=args.num_visuals)
 
 
-def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2):
+def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2, epo):
     nll_meter = util.AverageMeter()
 
     model.eval()
@@ -180,7 +178,7 @@ def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2):
             batch_size = cw_idxs.size(0)
 
             # Forward
-            log_p1, log_p2 = model(cw_idxs, qw_idxs, cc_idxs, qc_idxs)
+            log_p1, log_p2 = model(cw_idxs, cc_idxs, qw_idxs, qc_idxs)
             y1, y2 = y1.to(device), y2.to(device)
             loss = F.nll_loss(log_p1, y1) + F.nll_loss(log_p2, y2)
             nll_meter.update(loss.item(), batch_size)
@@ -188,7 +186,9 @@ def evaluate(model, data_loader, device, eval_file, max_len, use_squad_v2):
             # Get F1 and EM scores
             p1, p2 = log_p1.exp(), log_p2.exp()
             starts, ends = util.discretize(p1, p2, max_len, use_squad_v2)
-
+            if epo and starts.size(0) < 20:
+                print('starts', starts)
+                print('ends', ends)
             # Log info
             progress_bar.update(batch_size)
             progress_bar.set_postfix(NLL=nll_meter.avg)

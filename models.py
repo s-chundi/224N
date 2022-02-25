@@ -7,8 +7,7 @@ Author:
 import layers
 import torch
 import torch.nn as nn
-import util
-
+import torch.nn.functional as F
 
 class BiDAF(nn.Module):
     """Baseline BiDAF model for SQuAD.
@@ -30,9 +29,10 @@ class BiDAF(nn.Module):
         hidden_size (int): Number of features in the hidden state at each layer.
         drop_prob (float): Dropout probability.
     """
-    def __init__(self, word_vectors, hidden_size, drop_prob=0.):
+    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob=0.):
         super(BiDAF, self).__init__()
         self.emb = layers.Embedding(word_vectors=word_vectors,
+                                    char_vectors=char_vectors,
                                     hidden_size=hidden_size,
                                     drop_prob=drop_prob)
 
@@ -52,121 +52,65 @@ class BiDAF(nn.Module):
         self.out = layers.BiDAFOutput(hidden_size=hidden_size,
                                       drop_prob=drop_prob)
 
-    def forward(self, cw_idxs, qw_idxs):
-        c_mask = torch.zeros_like(cw_idxs) != cw_idxs
-        q_mask = torch.zeros_like(qw_idxs) != qw_idxs
-        c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
-
-        c_emb = self.emb(cw_idxs)         # (batch_size, c_len, hidden_size)
-        q_emb = self.emb(qw_idxs)         # (batch_size, q_len, hidden_size)
-        c_enc = self.enc(c_emb, c_len)    # (batch_size, c_len, 2 * hidden_size)
-        q_enc = self.enc(q_emb, q_len)    # (batch_size, q_len, 2 * hidden_size)
-        att = self.att(c_enc, q_enc,
-                       c_mask, q_mask)    # (batch_size, c_len, 8 * hidden_size)
-        mod = self.mod(att, c_len)        # (batch_size, c_len, 2 * hidden_size)
-
-        out = self.out(att, mod, c_mask)  # 2 tensors, each (batch_size, c_len)
-        return out
-
-class QAnet(nn.Module):
-    """
-    Args:
-        word_vectors (torch.Tensor): Pre-trained word vectors.
-        hidden_size (int): Number of features in the hidden state at each layer.
-        drop_prob (float): Dropout probability.
-    """
-    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob=0.):
-        super(QAnet, self).__init__()
-        self.embC = layers.Embedding(word_vectors=word_vectors,
-                                    char_vectors=char_vectors,
-                                    hidden_size=hidden_size,
-                                    drop_prob=drop_prob)
-
-        self.embQ = layers.Embedding(word_vectors=word_vectors,
-                                    char_vectors=char_vectors,
-                                    hidden_size=hidden_size,
-                                    drop_prob=drop_prob)
-
-        # TODO: conv number should be 4 or something. Make kernel size a hyperparameter
-        self.encC = layers.Embed_encoder_block(input_size=hidden_size,
-                                            conv_num=4,
-                                            channels=hidden_size,
-                                            kern_size=7,
-                                            drop_prob=0.1)
-
-        self.encQ = layers.Embed_encoder_block(input_size=hidden_size,
-                                            conv_num=4,
-                                            channels=hidden_size,
-                                            kern_size=7,
-                                            drop_prob=0.1)
-
-        self.att = layers.BiDAFAttention(hidden_size=hidden_size, drop_prob=drop_prob)
-
-
-        # TODO: conv number should be 4 or something. Make kernel size a hyperparameter
-        self.block1 = layers.Embed_encoder_block(input_size=4 * hidden_size,
-                                     conv_num=4,
-                                     channels= 4 * hidden_size,
-                                     kern_size=7,
-                                     drop_prob=drop_prob)
-
-        self.block2 = layers.Embed_encoder_block(input_size=4 * hidden_size,
-                                     conv_num=4,
-                                     channels= 4 * hidden_size,
-                                     kern_size=7,
-                                     drop_prob=drop_prob)
-
-        self.block3 = layers.Embed_encoder_block(input_size=4 * hidden_size,
-                                     conv_num=4,
-                                     channels= 4 * hidden_size,
-                                     kern_size=7,
-                                     drop_prob=drop_prob)
-
-        self.out = layers.Output(dim=hidden_size, context_len=150)
-
     def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
         c_mask = torch.zeros_like(cw_idxs) != cw_idxs
         q_mask = torch.zeros_like(qw_idxs) != qw_idxs
         c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
 
-        c_emb = self.embC(cw_idxs, cc_idxs)         
-        q_emb = self.embQ(qw_idxs, qc_idxs)
-        
-        c_enc = self.encC(c_emb, c_mask)   
-        q_enc = self.encQ(q_emb, q_mask)
-        # Done until here  
-        att = self.att(c_enc, q_enc, c_mask, q_mask)    
-        out1 = self.block1(att, c_mask)
-        out2 = self.block2(out1, c_mask)
-        out3 = self.block3(out2, c_mask)
+        c_emb = self.emb(cw_idxs, cc_idxs)         # (batch_size, c_len, hidden_size)
+        q_emb = self.emb(qw_idxs, qc_idxs)         # (batch_size, q_len, hidden_size)
 
-        out = self.out(out1, out2, out3, c_mask)  # 2 tensors, each (batch_size, c_len)
+        c_enc = self.enc(c_emb, c_len)    # (batch_size, c_len, 2 * hidden_size)
+        q_enc = self.enc(q_emb, q_len)    # (batch_size, q_len, 2 * hidden_size)
+
+        att = self.att(c_enc, q_enc,
+                       c_mask, q_mask)    # (batch_size, c_len, 8 * hidden_size)
+
+        mod = self.mod(att, c_len)        # (batch_size, c_len, 2 * hidden_size)
+
+        out = self.out(att, mod, c_mask)  # 2 tensors, each (batch_size, c_len)
+
         return out
 
-class Simple(nn.Module):
-    def __init__(self, word_vectors, hidden_size, drop_prob=0.):
-        super(Simple, self).__init__()
-        self.emb = layers.Embedding(word_vectors=word_vectors,
-                                    hidden_size=hidden_size,
-                                    drop_prob=drop_prob)
-        self.lin0 = nn.Linear(164*100, 164*100)
-        self.lin1 = nn.Linear(164*100, 150)
-        self.lin2 = nn.Linear(164*100, 150)
 
-    def forward(self, cw_idxs, qw_idxs):
+class QANet(nn.Module):
+    def __init__(self, word_vectors, char_vectors, hid_size):
+        super().__init__()
+        # TODO remove hardcoded constants, and get the embed sizes from above
+        self.emb = layers.Embedding(word_vectors, char_vectors, hid_size=hid_size)
+        self.encoder = layers.EmbedEncoderBlock(conv_num=4, hid_size=hid_size, kernel=7)
+        self.biatt = layers.BiDAFAttention(hid_size)
+        # TODO: possibly remove this conv and make a huge set of encoder blocks
+        self.conv = nn.Conv1d(hid_size*4, hid_size, kernel_size=1)
+        # To mimic original QANet, set this to 1 possibly
+        self.stack_size = 7
+        # Should I make these 3 separate stacks?
+        self.stack = nn.ModuleList([layers.EmbedEncoderBlock(conv_num=2, hid_size=hid_size, kernel=5) for _ in range(self.stack_size)])
+        self.out = layers.Output()
+
+    def forward(self, cw_idxs, cc_idxs, qw_idxs, qc_idxs):
         c_mask = torch.zeros_like(cw_idxs) != cw_idxs
         q_mask = torch.zeros_like(qw_idxs) != qw_idxs
         c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
-
-        c_emb = self.emb(cw_idxs)         # (batch_size, c_len, hidden_size)
-        q_emb = self.emb(qw_idxs)         # (batch_size, q_len, hidden_size)
-        
-        a = torch.cat((c_emb, q_emb), dim=1)
-        bs, len, hsize = a.size()
-        a = torch.reshape(a, (bs, len*hsize))
-        b = self.lin1(a)
-        c = self.lin2(a)
-        d = util.masked_softmax(b, c_mask, log_softmax=True)
-        e = util.masked_softmax(c, c_mask, log_softmax=True)
-        
-        return d, e
+        c_len = torch.max(c_len)
+        context = self.emb(cw_idxs, cc_idxs)
+        query = self.emb(qw_idxs, qc_idxs)
+        contextenc = self.encoder(context, c_mask)
+        queryenc = self.encoder(query, q_mask)
+        contextenc = torch.transpose(contextenc, 1, 2)
+        queryenc = torch.transpose(queryenc, 1, 2)
+        out = self.biatt(contextenc, queryenc, c_mask, q_mask)
+        out = self.conv(out.transpose(1, 2))
+        out = F.dropout(out, p=0.1, training=self.training)
+        for encoder in self.stack:
+             out = encoder(out, c_mask)
+        out1 = out
+        for encoder in self.stack:
+             out = encoder(out, c_mask)
+        out2 = out
+        out = F.dropout(out, p=0.1, training=self.training)
+        for encoder in self.stack:
+             out = encoder(out, c_mask)
+        out3 = out
+        p1, p2 = self.out(out1, out2, out3, c_mask)
+        return p1, p2
