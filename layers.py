@@ -12,6 +12,7 @@ import util
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from util import masked_softmax
 import args
+from torch.autograd import Variable
 import math
 
 # TODO: More descriptive names for EVERYTHING. Make these args somehow
@@ -177,16 +178,16 @@ class BiDAFOutput(nn.Module):
         hidden_size (int): Hidden size used in the BiDAF model.
         drop_prob (float): Probability of zero-ing out activations.
     """
-    def __init__(self, hidden_size, drop_prob):
+    def __init__(self, hidden_size, drop_prob, x=8):
         super(BiDAFOutput, self).__init__()
-        self.att_linear_1 = nn.Linear(8 * hidden_size, 1)
+        self.att_linear_1 = nn.Linear(x * hidden_size, 1)
         self.mod_linear_1 = nn.Linear(2 * hidden_size, 1)
 
         self.rnn = RNNEncoder(input_size=2 * hidden_size,
                               hidden_size=hidden_size,
                               num_layers=1,
                               drop_prob=drop_prob)
-        self.att_linear_2 = nn.Linear(8 * hidden_size, 1)
+        self.att_linear_2 = nn.Linear(x * hidden_size, 1)
         self.mod_linear_2 = nn.Linear(2 * hidden_size, 1)
 
     def forward(self, att, mod, mask):
@@ -221,19 +222,41 @@ class Depthwise_conv(nn.Module):
         x = F.relu(x)
         return x
 # Done!
-class SelfAttention(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.multatt = nn.MultiheadAttention(hid_size, num_heads=2, dropout=0.05)
+class PositionalEncoding(nn.Module):
+    "Implement the PE function."
+    def __init__(self, d_model, dropout, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        
+        # Compute the positional encodings once in log space.
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) *
+                             -(math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+        
+    def forward(self, x):
+        x = x + Variable(self.pe[:, :x.size(1)], 
+                         requires_grad=False)
+        return self.dropout(x)
 
+class SelfAttention(nn.Module):
+    def __init__(self, num_heads=2, hid_size=128):
+        super().__init__()
+        self.multatt = nn.MultiheadAttention(hid_size, num_heads=num_heads, dropout=0.05)
+        # These could be removed for some reason
+        self.conv1 = nn.Conv1d(hid_size, hid_size, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv1d(hid_size, hid_size, kernel_size=5, padding=2)
     def forward(self, query, mask):
         # Everything needs to be passed in (Sl, N, E)
         # Self attention has the same key, query, value
-        query = query.permute(2, 0, 1)
-        key = query
-        values = key
+        values = query.permute(2, 0, 1)
+        key = self.conv1(query).permute(2, 0, 1)
+        query = self.conv2(query).permute(2, 0, 1)
         mask = ~mask
-        print(query.size(), key.size(), values.size())
         # TODO: Implement multihead dot product attention with convs, it could be much faster
         output, _ = self.multatt(query, key, values, key_padding_mask=mask)
         # Back to N Sl E
@@ -283,20 +306,21 @@ class Unit(nn.Module):
 
 # Done!
 class EmbedEncoderBlock(nn.Module):
-    def __init__(self, conv_num, hid_size, kernel):
+    def __init__(self, conv_num, hid_size, kernel, num_heads=2):
         super().__init__()
         self.units = nn.ModuleList([Unit(hid_size, kernel=kernel, drop_prob=0.1) for _ in range(conv_num)])
         self.unit1 = Unit(hid_size, kernel=kernel, drop_prob=0.1)
-        self.selfatt = SelfAttention()
+        self.selfatt = SelfAttention(num_heads=num_heads, hid_size=hid_size)
         self.unit2 = Unit(hid_size, kernel=kernel, drop_prob=0.1)
         self.feed_forward = nn.Conv1d(hid_size, hid_size, kernel_size=3, padding=1)
         self.relu1 = nn.ReLU()
         # TODO: determine which initialization works best. Also cite this
-        self.pos_emb = nn.Parameter(torch.randn(hid_size, 400))
+        # self.pos_emb = nn.Parameter(torch.randn(hid_size, 400))
+        self.pos_emb = PositionalEncoding(hid_size, dropout=0.1, max_len=500)
 
     def forward(self, x, mask):
         # TODO is mask needed for this part? Can we make these better?
-        out = self.pos_emb[:, :x.size(2)] + x
+        out = self.pos_emb(x.transpose(1, 2)).transpose(1, 2)
         for unit in self.units:
             res = out
             out = unit(out)
@@ -316,7 +340,7 @@ class EmbedEncoderBlock(nn.Module):
 
 # Done!
 class Output(nn.Module):
-    def __init__(self):
+    def __init__(self, hid_size=128):
         super().__init__()
         # TODO: make these linear have to do some transposes etc.
         # TODO: test linear vs transposes

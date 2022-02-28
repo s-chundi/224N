@@ -109,7 +109,7 @@ def collate_fn(examples):
 
     def merge_1d(arrays, dtype=torch.int64, pad_value=0):
         lengths = [(a != pad_value).sum() for a in arrays]
-        padded = torch.zeros(len(arrays), max(lengths), dtype=dtype)
+        padded = torch.zeros(len(arrays), 150, dtype=dtype)
         for i, seq in enumerate(arrays):
             end = lengths[i]
             padded[i, :end] = seq[:end]
@@ -118,7 +118,7 @@ def collate_fn(examples):
     def merge_2d(matrices, dtype=torch.int64, pad_value=0):
         heights = [(m.sum(1) != pad_value).sum() for m in matrices]
         widths = [(m.sum(0) != pad_value).sum() for m in matrices]
-        padded = torch.zeros(len(matrices), max(heights), max(widths), dtype=dtype)
+        padded = torch.zeros(len(matrices), 150, 16, dtype=dtype)
         for i, seq in enumerate(matrices):
             height, width = heights[i], widths[i]
             padded[i, :height, :width] = seq[:height, :width]

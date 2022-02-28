@@ -6,6 +6,8 @@ Author:
 
 import argparse
 
+from models import QANet
+
 
 def get_setup_args():
     """Get arguments needed in setup.py."""
@@ -92,7 +94,10 @@ def get_train_args():
 
     add_common_args(parser)
     add_train_test_args(parser)
-
+    parser.add_argument('--model', 
+                        type=str, 
+                        default='QANet', 
+                        help='Which model you want to train')
     parser.add_argument('--eval_steps',
                         type=int,
                         default=50000,
@@ -232,7 +237,7 @@ def add_train_test_args(parser):
                         help='Whether to use SQuAD 2.0 (unanswerable) questions.')
     parser.add_argument('--hidden_size',
                         type=int,
-                        default=100,
+                        default=128,
                         help='Number of features in encoder hidden layers.')
     parser.add_argument('--num_visuals',
                         type=int,
