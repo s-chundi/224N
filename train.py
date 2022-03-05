@@ -4,6 +4,7 @@ Author:
     Chris Chute (chute@stanford.edu)
 """
 
+from calendar import c
 import numpy as np
 import random
 import torch
@@ -17,7 +18,7 @@ import util
 from args import get_train_args
 from collections import OrderedDict
 from json import dumps
-from models import QANet, BiDAF, Hybrid, QANetBulky
+from models import QANet 
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 from ujson import load as json_load
@@ -47,26 +48,13 @@ def main(args):
 
     # Get model
     log.info('Building model...')
-    if args.model == 'QANet':
-        model = QANet(word_vectors=word_vectors,
+    model = QANet(word_vectors=word_vectors,
                     char_vectors=char_vectors,
-                    hid_size=128)
-    elif args.model == 'Hybrid':
-        model = Hybrid(word_vectors=word_vectors,
-                    char_vectors=char_vectors,
-                    hidden_size=128)
-    elif args.model == 'Bulky':
-        model = QANetBulky(word_vectors=word_vectors,
-                            char_vectors=char_vectors,
-                            hid_size=256)
-    else:
-        model = BiDAF(word_vectors=word_vectors,
-                    char_vectors=char_vectors,
-                    hidden_size=128)
+                    hid_size=args.hidden_size)
 
     model = nn.DataParallel(model, args.gpu_ids)
 
-    print(summary(model))
+    log.info(summary(model))
     if args.load_path:
         log.info(f'Loading checkpoint from {args.load_path}...')
         model, step = util.load_model(model, args.load_path, args.gpu_ids)
