@@ -18,7 +18,7 @@ import util
 from args import get_train_args
 from collections import OrderedDict
 from json import dumps
-from models import QANet 
+from models import BulkyBoi1
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 from ujson import load as json_load
@@ -48,18 +48,17 @@ def main(args):
 
     # Get model
     log.info('Building model...')
-    model = QANet(word_vectors=word_vectors,
-                    char_vectors=char_vectors,
-                    hid_size=args.hidden_size)
+    model = BulkyBoi1(word_vectors=word_vectors, char_vectors=char_vectors, hid_size=args.hidden_size)
 
-    model = nn.DataParallel(model, args.gpu_ids)
-
-    log.info(summary(model))
-    if args.load_path:
-        log.info(f'Loading checkpoint from {args.load_path}...')
-        model, step = util.load_model(model, args.load_path, args.gpu_ids)
+    # log.info(summary(model))
+    if args.load_path1:
+        log.info(f'Loading checkpoint from {args.load_path1}...')
+        model, step = util.load_model(model, args.load_path1, args.gpu_ids)
     else:
         step = 0
+    
+    model = nn.DataParallel(model, args.gpu_ids)
+
     model = model.to(device)
     model.train()
     ema = util.EMA(model, args.ema_decay)

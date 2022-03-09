@@ -5,29 +5,25 @@ Author:
 """
 import math
 import numpy as np
-import layers
 import torch
+import layers
 import torch.nn as nn
 import util
-import torch.nn.functional as F 
-from torchinfo import summary
+import torch.nn.functional as F
 device, _ = util.get_available_devices()
 
 class BiDAF(nn.Module):
     """Baseline BiDAF model for SQuAD.
-
     Based on the paper:
     "Bidirectional Attention Flow for Machine Comprehension"
     by Minjoon Seo, Aniruddha Kembhavi, Ali Farhadi, Hannaneh Hajishirzi
     (https://arxiv.org/abs/1611.01603).
-
     Follows a high-level structure commonly found in SQuAD models:
         - Embedding layer: Embed word indices to get word vectors.
         - Encoder layer: Encode the embedded sequence.
         - Attention layer: Apply an attention mechanism to the encoded sequence.
         - Model encoder layer: Encode the sequence again.
         - Output layer: Simple layer (e.g., fc + softmax) to get final outputs.
-
     Args:
         word_vectors (torch.Tensor): Pre-trained word vectors.
         hidden_size (int): Number of features in the hidden state at each layer.
@@ -75,18 +71,21 @@ class BiDAF(nn.Module):
         out = self.out(att, mod, c_mask)  # 2 tensors, each (batch_size, c_len)
 
         return out
-    
+
 class QANet(nn.Module):
     def __init__(self, word_vectors, char_vectors, hid_size, num_head=8):  # TODO: Trying 8 head attention, could go crazy.
         super().__init__()
         self.embedding = layers.Embedding(word_vectors, char_vectors, hid_size)
+        # Can use more convolutions here
         self.encoder = layers.EncodingBlock(hid_size=hid_size, conv_num=4, num_head=num_head, kernel_size=7)
         self.jointattention = layers.BiDAFAttention(hid_size, 0.2)
         self.reshape = nn.Conv1d(hid_size*4, hid_size, kernel_size=1)
+        # Can make a bigger stack
         self.stack = nn.ModuleList([layers.EncodingBlock(hid_size=hid_size, 
                                                 conv_num=2, 
                                                 num_head=num_head, 
                                                 kernel_size=5) for _ in range(7)])
+        # Can have more convolution operations here                                        
         self.out = layers.Output(hid_size)
 
     def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
@@ -112,3 +111,119 @@ class QANet(nn.Module):
         start, end = self.out(out1, out2, out3, c_mask)
         return start, end
 
+class BulkyBoi1(nn.Module):
+    def __init__(self, word_vectors, char_vectors, hid_size, num_head=8):  # TODO: Trying 8 head attention, could go crazy.
+        super().__init__()
+        self.embedding = layers.Embedding(word_vectors, char_vectors, hid_size)
+        # Can use more convolutions here
+        self.encoder = layers.EncodingBlock(hid_size=hid_size, conv_num=4, num_head=num_head, kernel_size=7)
+        self.jointattention = layers.BiDAFAttention(hid_size, 0.2)
+        self.reshape = nn.Conv1d(hid_size*4, hid_size, kernel_size=1)
+        # Can make a bigger stack
+        self.stack = nn.ModuleList([layers.EncodingBlock(hid_size=hid_size, 
+                                                conv_num=2, 
+                                                num_head=num_head, 
+                                                kernel_size=5) for _ in range(9)])
+        # Can have more convolution operations here                                        
+        self.out = layers.Output(hid_size)
+
+    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
+        c_mask = (torch.zeros_like(cw_idxs) != cw_idxs)
+        q_mask = (torch.zeros_like(qw_idxs) != qw_idxs)
+        context_emb = self.embedding(cc_idxs, cw_idxs)
+        query_emb = self.embedding(qc_idxs, qw_idxs)
+        context = self.encoder(context_emb, c_mask).transpose(1, 2)
+        query = self.encoder(query_emb, q_mask).transpose(1, 2)
+        x = self.jointattention(context, query, c_mask, q_mask).transpose(1, 2)
+        x = self.reshape(x)
+        x = F.dropout(x, p=0.1, training=self.training)
+        for encoding_block in self.stack:
+             x = encoding_block(x, c_mask)
+        out1 = x
+        for encoding_block in self.stack:
+             x = encoding_block(x, c_mask)
+        out2 = x
+        x = F.dropout(x, p=0.1, training=self.training)
+        for encoding_block in self.stack:
+             x = encoding_block(x, c_mask)
+        out3 = x
+        start, end = self.out(out1, out2, out3, c_mask)
+        return start, end
+
+class BulkyBoi2(nn.Module):
+    def __init__(self, word_vectors, char_vectors, hid_size, num_head=8):  # TODO: Trying 8 head attention, could go crazy.
+        super().__init__()
+        self.embedding = layers.Embedding(word_vectors, char_vectors, hid_size)
+        # Can use more convolutions here
+        self.encoder = layers.EncodingBlock(hid_size=hid_size, conv_num=4, num_head=num_head, kernel_size=7)
+        self.jointattention = layers.BiDAFAttention(hid_size, 0.2)
+        self.reshape = nn.Conv1d(hid_size*4, hid_size, kernel_size=1)
+        # Can make a bigger stack
+        self.stack = nn.ModuleList([layers.EncodingBlock(hid_size=hid_size, 
+                                                conv_num=2, 
+                                                num_head=num_head, 
+                                                kernel_size=5) for _ in range(7)])
+        # Can have more convolution operations here                                        
+        self.out = layers.BulkyOutput(hid_size)
+
+    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
+        c_mask = (torch.zeros_like(cw_idxs) != cw_idxs)
+        q_mask = (torch.zeros_like(qw_idxs) != qw_idxs)
+        context_emb = self.embedding(cc_idxs, cw_idxs)
+        query_emb = self.embedding(qc_idxs, qw_idxs)
+        context = self.encoder(context_emb, c_mask).transpose(1, 2)
+        query = self.encoder(query_emb, q_mask).transpose(1, 2)
+        x = self.jointattention(context, query, c_mask, q_mask).transpose(1, 2)
+        x = self.reshape(x)
+        x = F.dropout(x, p=0.1, training=self.training)
+        for encoding_block in self.stack:
+             x = encoding_block(x, c_mask)
+        out1 = x
+        for encoding_block in self.stack:
+             x = encoding_block(x, c_mask)
+        out2 = x
+        x = F.dropout(x, p=0.1, training=self.training)
+        for encoding_block in self.stack:
+             x = encoding_block(x, c_mask)
+        out3 = x
+        start, end = self.out(out1, out2, out3, c_mask)
+        return start, end
+
+class BulkyBoi3(nn.Module):
+    def __init__(self, word_vectors, char_vectors, hid_size, num_head=8):  # TODO: Trying 8 head attention, could go crazy.
+        super().__init__()
+        self.embedding = layers.Embedding(word_vectors, char_vectors, hid_size)
+        # Can use more convolutions here
+        self.encoder = layers.EncodingBlock(hid_size=hid_size, conv_num=6, num_head=num_head, kernel_size=7)
+        self.jointattention = layers.BiDAFAttention(hid_size, 0.2)
+        self.reshape = nn.Conv1d(hid_size*4, hid_size, kernel_size=1)
+        # Can make a bigger stack
+        self.stack = nn.ModuleList([layers.EncodingBlock(hid_size=hid_size, 
+                                                conv_num=3, 
+                                                num_head=num_head, 
+                                                kernel_size=5) for _ in range(9)])
+        # Can have more convolution operations here                                        
+        self.out = layers.Output(hid_size)
+
+    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
+        c_mask = (torch.zeros_like(cw_idxs) != cw_idxs)
+        q_mask = (torch.zeros_like(qw_idxs) != qw_idxs)
+        context_emb = self.embedding(cc_idxs, cw_idxs)
+        query_emb = self.embedding(qc_idxs, qw_idxs)
+        context = self.encoder(context_emb, c_mask).transpose(1, 2)
+        query = self.encoder(query_emb, q_mask).transpose(1, 2)
+        x = self.jointattention(context, query, c_mask, q_mask).transpose(1, 2)
+        x = self.reshape(x)
+        x = F.dropout(x, p=0.1, training=self.training)
+        for encoding_block in self.stack:
+             x = encoding_block(x, c_mask)
+        out1 = x
+        for encoding_block in self.stack:
+             x = encoding_block(x, c_mask)
+        out2 = x
+        x = F.dropout(x, p=0.1, training=self.training)
+        for encoding_block in self.stack:
+             x = encoding_block(x, c_mask)
+        out3 = x
+        start, end = self.out(out1, out2, out3, c_mask)
+        return start, end

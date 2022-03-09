@@ -148,9 +148,9 @@ class Embedding(nn.Module):
         # This only does convolution over each character
         # TODO: could we just use reshape + conv1d?
         self.conv2d = nn.Conv2d(64, hid_size, kernel_size = (1,k))
-        nn.init.kaiming_normal_(self.conv2d.weight, nonlinearity='relu')
+        # nn.init.kaiming_normal_(self.conv2d.weight, nonlinearity='relu')
         self.conv1d = nn.Conv1d(300 + hid_size, hid_size, kernel_size=1)
-        nn.init.kaiming_normal_(self.conv1d.weight, nonlinearity='relu')
+        # nn.init.kaiming_normal_(self.conv1d.weight, nonlinearity='relu')
         self.char_emb = nn.Embedding.from_pretrained(char_vectors)
         self.word_emb = nn.Embedding.from_pretrained(word_vectors)
         self.hwy = HighwayEncoder(2, hid_size)
@@ -191,7 +191,7 @@ class EncodingBlock(nn.Module):
     def __init__(self, hid_size, conv_num, num_head, kernel_size):
         super().__init__()
         self.units = nn.ModuleList([Unit(hid_size, kernel_size) for _ in range(conv_num)])
-        self.selfattention = nn.MultiheadAttention(hid_size, num_head, 0.1)
+        self.selfattention = nn.MultiheadAttention(hid_size, 1, 0.1)
         self.layernorm_1 = nn.LayerNorm(hid_size)
         self.layernorm_2 = nn.LayerNorm(hid_size)
         self.lin = nn.Linear(hid_size, hid_size)
@@ -201,7 +201,8 @@ class EncodingBlock(nn.Module):
         for conv in self.units:
             res = x
             x = conv(x)
-            if self.training == True and np.random.rand() < dropout:
+            
+            if self.training == True and torch.empty(1).uniform_(0,1) < dropout:
                 x = res
             else:
                 x = x + res
@@ -213,7 +214,8 @@ class EncodingBlock(nn.Module):
         x, _ = self.selfattention(x, x, x, key_padding_mask=mask)
         x = x.permute(1, 2, 0)
         x = F.dropout(x, p=0.1, training=self.training)
-        if self.training == True and np.random.rand() < dropout:
+        
+        if self.training == True and torch.empty(1).uniform_(0,1) < dropout:
             x = res
         else:
             x = x + res
@@ -225,7 +227,8 @@ class EncodingBlock(nn.Module):
         x = self.lin(x.transpose(1,2)).transpose(1,2)
         x = F.relu(x)
         x = F.dropout(x, p=0.1, training=self.training)
-        if self.training == True and np.random.rand() < dropout:
+        
+        if self.training == True and torch.empty(1).uniform_(0,1) < dropout:
             x = res
         else:
             x = x + res
@@ -240,23 +243,45 @@ class Output(nn.Module):
             self.feedforward1 = nn.Linear(hid_size*2, 1)
             self.feedforward2 = nn.Linear(hid_size*2, 1)
         else:
+            # Potentially More feedforward stuff.
             self.feedforward1 = nn.Conv1d(hid_size*2, 1, kernel_size=1, bias=False)
             self.feedforward2 = nn.Conv1d(hid_size*2, 1, kernel_size=1, bias=False)
         
 
-    def forward(self, M1, M2, M3, mask):
+    def forward(self, out1, out2, out3, mask):
         if self.linear:
-            start = torch.cat([M1, M2], dim=1).transpose(1,2)
-            end = torch.cat([M1, M3], dim=1).transpose(1,2)
+            start = torch.cat([out1, out2], dim=1).transpose(1,2)
+            end = torch.cat([out1, out3], dim=1).transpose(1,2)
         else:
-            start = torch.cat([M1, M2], dim=1)
-            end = torch.cat([M1, M3], dim=1)
+            start = torch.cat([out1, out2], dim=1)
+            end = torch.cat([out1, out3], dim=1)
         start = self.feedforward1(start)
         end = self.feedforward2(end)
         start = util.masked_softmax(start.squeeze(), mask, log_softmax=True)
         end = util.masked_softmax(end.squeeze(), mask, log_softmax=True)
         return start, end
 
+class BulkyOutput(nn.Module):
+    def __init__(self, hid_size, linear=False):
+        super().__init__()
+        self.feedforward1 = nn.Conv1d(hid_size*2, hid_size*2, kernel_size=3, padding=1, bias=False)
+        self.feedforward2 = nn.Conv1d(hid_size*2, hid_size*2, kernel_size=3, padding=1, bias=False)
+        self.feedforward3 = nn.Conv1d(hid_size*2, 1, kernel_size=1, bias=False)
+        self.feedforward4 = nn.Conv1d(hid_size*2, 1, kernel_size=1, bias=False)
+        
+
+    def forward(self, out1, out2, out3, mask):
+        start = torch.cat([out1, out2], dim=1)
+        end = torch.cat([out1, out3], dim=1)
+        start = self.feedforward1(start)
+        end = self.feedforward2(end)
+        start = F.relu(start)
+        end = F.relu(end)
+        start = self.feedforward3(start)
+        end = self.feedforward4(end)
+        start = util.masked_softmax(start.squeeze(), mask, log_softmax=True)
+        end = util.masked_softmax(end.squeeze(), mask, log_softmax=True)
+        return start, end
 
 class RNNEncoder(nn.Module):
     """General-purpose layer for encoding a sequence using a bidirectional RNN.
@@ -305,7 +330,6 @@ class RNNEncoder(nn.Module):
         x = F.dropout(x, self.drop_prob, self.training)
 
         return x
-
 
 
 class BiDAFOutput(nn.Module):
