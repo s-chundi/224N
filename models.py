@@ -51,7 +51,7 @@ class BiDAF(nn.Module):
         self.out = layers.BiDAFOutput(hidden_size=hidden_size,
                                       drop_prob=drop_prob)
 
-    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
+    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs, log_softmax=True):
         c_mask = torch.zeros_like(cw_idxs) != cw_idxs
         q_mask = torch.zeros_like(qw_idxs) != qw_idxs
         c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
@@ -88,7 +88,7 @@ class QANet(nn.Module):
         # Can have more convolution operations here                                        
         self.out = layers.Output(hid_size)
 
-    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
+    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs, log_softmax=True):
         c_mask = (torch.zeros_like(cw_idxs) != cw_idxs)
         q_mask = (torch.zeros_like(qw_idxs) != qw_idxs)
         context_emb = self.embedding(cc_idxs, cw_idxs)
@@ -108,7 +108,7 @@ class QANet(nn.Module):
         for encoding_block in self.stack:
              x = encoding_block(x, c_mask)
         out3 = x
-        start, end = self.out(out1, out2, out3, c_mask)
+        start, end = self.out(out1, out2, out3, c_mask, log_softmax)
         return start, end
 
 class BulkyBoi1(nn.Module):
@@ -127,7 +127,7 @@ class BulkyBoi1(nn.Module):
         # Can have more convolution operations here                                        
         self.out = layers.Output(hid_size)
 
-    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
+    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs, log_softmax=True):
         c_mask = (torch.zeros_like(cw_idxs) != cw_idxs)
         q_mask = (torch.zeros_like(qw_idxs) != qw_idxs)
         context_emb = self.embedding(cc_idxs, cw_idxs)
@@ -147,7 +147,7 @@ class BulkyBoi1(nn.Module):
         for encoding_block in self.stack:
              x = encoding_block(x, c_mask)
         out3 = x
-        start, end = self.out(out1, out2, out3, c_mask)
+        start, end = self.out(out1, out2, out3, c_mask, log_softmax)
         return start, end
 
 class BulkyBoi2(nn.Module):
@@ -166,7 +166,7 @@ class BulkyBoi2(nn.Module):
         # Can have more convolution operations here                                        
         self.out = layers.BulkyOutput(hid_size)
 
-    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
+    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs, log_softmax=True):
         c_mask = (torch.zeros_like(cw_idxs) != cw_idxs)
         q_mask = (torch.zeros_like(qw_idxs) != qw_idxs)
         context_emb = self.embedding(cc_idxs, cw_idxs)
@@ -186,7 +186,7 @@ class BulkyBoi2(nn.Module):
         for encoding_block in self.stack:
              x = encoding_block(x, c_mask)
         out3 = x
-        start, end = self.out(out1, out2, out3, c_mask)
+        start, end = self.out(out1, out2, out3, c_mask, log_softmax)
         return start, end
 
 class BulkyBoi3(nn.Module):
@@ -199,13 +199,13 @@ class BulkyBoi3(nn.Module):
         self.reshape = nn.Conv1d(hid_size*4, hid_size, kernel_size=1)
         # Can make a bigger stack
         self.stack = nn.ModuleList([layers.EncodingBlock(hid_size=hid_size, 
-                                                conv_num=3, 
+                                                conv_num=2, 
                                                 num_head=num_head, 
                                                 kernel_size=5) for _ in range(9)])
         # Can have more convolution operations here                                        
         self.out = layers.Output(hid_size)
 
-    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
+    def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs, log_softmax=True):
         c_mask = (torch.zeros_like(cw_idxs) != cw_idxs)
         q_mask = (torch.zeros_like(qw_idxs) != qw_idxs)
         context_emb = self.embedding(cc_idxs, cw_idxs)
@@ -225,5 +225,5 @@ class BulkyBoi3(nn.Module):
         for encoding_block in self.stack:
              x = encoding_block(x, c_mask)
         out3 = x
-        start, end = self.out(out1, out2, out3, c_mask)
+        start, end = self.out(out1, out2, out3, c_mask, log_softmax)
         return start, end

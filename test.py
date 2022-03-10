@@ -12,8 +12,6 @@ Author:
 """
 
 import csv
-import sys
-sys.settrace
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,12 +21,13 @@ import util
 from args import get_test_args
 from collections import OrderedDict
 from json import dumps
-from models import QAnet, Hybrid, BiDAF
+from models import QANet, BulkyBoi1, BulkyBoi2, BulkyBoi3
 from os.path import join
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 from ujson import load as json_load
 from util import collate_fn, SQuAD
+
 
 
 def main(args):
@@ -42,14 +41,19 @@ def main(args):
     # Get embeddings
     log.info('Loading embeddings...')
     word_vectors = util.torch_from_json(args.word_emb_file)
+    char_vectors = util.torch_from_json(args.char_emb_file)
 
     # Get model
     log.info('Building model...')
-    model = QAnet(word_vectors=word_vectors,
-                  hidden_size=args.hidden_size)
-    model = nn.DataParallel(model, gpu_ids)
+    qanet = QANet(word_vectors=word_vectors, char_vectors=char_vectors, hid_size=args.hidden_size)
+    
+    
     log.info(f'Loading checkpoint from {args.load_path}...')
-    model = util.load_model(model, args.load_path, gpu_ids, return_step=False)
+    model = util.load_model(qanet, args.load_path, gpu_ids, return_step=False)
+    
+
+    # model = Ensemble(qanet, boi1, boi2, boi3)
+    model = nn.DataParallel(model, gpu_ids)
     model = model.to(device)
     model.eval()
 

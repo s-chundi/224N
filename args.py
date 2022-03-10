@@ -243,11 +243,19 @@ def add_train_test_args(parser):
                         type=int,
                         default=10,
                         help='Number of examples to visualize in TensorBoard.')
+    parser.add_argument('--load_path',
+                        type=str,
+                        default=None,
+                        help='Path to load as a model checkpoint.')
     parser.add_argument('--load_path1',
                         type=str,
                         default=None,
                         help='Path to load as a model checkpoint.')
     parser.add_argument('--load_path2',
+                        type=str,
+                        default=None,
+                        help='Path to load as a model checkpoint.')
+    parser.add_argument('--load_path3',
                         type=str,
                         default=None,
                         help='Path to load as a model checkpoint.')

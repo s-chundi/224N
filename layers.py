@@ -248,7 +248,7 @@ class Output(nn.Module):
             self.feedforward2 = nn.Conv1d(hid_size*2, 1, kernel_size=1, bias=False)
         
 
-    def forward(self, out1, out2, out3, mask):
+    def forward(self, out1, out2, out3, mask, log_softmax=True):
         if self.linear:
             start = torch.cat([out1, out2], dim=1).transpose(1,2)
             end = torch.cat([out1, out3], dim=1).transpose(1,2)
@@ -257,8 +257,8 @@ class Output(nn.Module):
             end = torch.cat([out1, out3], dim=1)
         start = self.feedforward1(start)
         end = self.feedforward2(end)
-        start = util.masked_softmax(start.squeeze(), mask, log_softmax=True)
-        end = util.masked_softmax(end.squeeze(), mask, log_softmax=True)
+        start = util.masked_softmax(start.squeeze(), mask, log_softmax=log_softmax)
+        end = util.masked_softmax(end.squeeze(), mask, log_softmax=log_softmax)
         return start, end
 
 class BulkyOutput(nn.Module):
@@ -270,7 +270,7 @@ class BulkyOutput(nn.Module):
         self.feedforward4 = nn.Conv1d(hid_size*2, 1, kernel_size=1, bias=False)
         
 
-    def forward(self, out1, out2, out3, mask):
+    def forward(self, out1, out2, out3, mask, log_softmax=True):
         start = torch.cat([out1, out2], dim=1)
         end = torch.cat([out1, out3], dim=1)
         start = self.feedforward1(start)
@@ -279,8 +279,8 @@ class BulkyOutput(nn.Module):
         end = F.relu(end)
         start = self.feedforward3(start)
         end = self.feedforward4(end)
-        start = util.masked_softmax(start.squeeze(), mask, log_softmax=True)
-        end = util.masked_softmax(end.squeeze(), mask, log_softmax=True)
+        start = util.masked_softmax(start.squeeze(), mask, log_softmax=log_softmax)
+        end = util.masked_softmax(end.squeeze(), mask, log_softmax=log_softmax)
         return start, end
 
 class RNNEncoder(nn.Module):

@@ -18,7 +18,7 @@ import util
 from args import get_train_args
 from collections import OrderedDict
 from json import dumps
-from models import BulkyBoi1
+from models import QANet
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 from ujson import load as json_load
@@ -48,7 +48,7 @@ def main(args):
 
     # Get model
     log.info('Building model...')
-    model = BulkyBoi1(word_vectors=word_vectors, char_vectors=char_vectors, hid_size=args.hidden_size)
+    model = QANet(word_vectors=word_vectors, char_vectors=char_vectors, hid_size=args.hidden_size)
 
     # log.info(summary(model))
     if args.load_path1:
