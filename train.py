@@ -23,7 +23,7 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm
 from ujson import load as json_load
 from util import collate_fn, SQuAD
-from torchinfo import summary
+# from torchinfo import summary
 
 def main(args):
     # Set up logging and devices
